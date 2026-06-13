@@ -1,96 +1,56 @@
 # Oddsmith
 
-A prediction oracle that lives entirely on-chain. You draft a forecast and write the exact criteria that decide it. When the outcome is knowable, anyone submits evidence and an AI oracle returns one of three rulings, YES, NO, or INVALID, with a confidence reading. That ruling is not one server's opinion: every GenLayer validator re-derives it and they must agree before it is written. No stake, no custody, only network fees.
+*A prediction oracle that lives entirely on-chain. You write a forecast and the exact criteria that settle it; when the outcome is knowable, anyone submits evidence and an AI oracle rules YES, NO, or INVALID with a confidence reading, re-derived by every GenLayer validator before it is recorded. No stake, no custody, network fees only.*
 
-```
-  SPEC SHEET
-  ----------------------------------------------------
-  network .......... GenLayer Bradbury Testnet (4221)
-  contract ......... 0xCdefeC7a47AC26A10083E626e22d5e9d49eBf471
-  rulings .......... YES / NO / INVALID  (+ 0-100 confidence)
-  writes ........... open_forecast, resolve_forecast
-  settlement ....... AI ruling under validator consensus
-  deposits ......... none
-  ----------------------------------------------------
-```
+It is sitting live at [warnedwarn.github.io/oddsmith](https://warnedwarn.github.io/oddsmith/), reading and writing to contract [`0xCdefeC7a…9eBf471`](https://explorer-bradbury.genlayer.com/address/0xCdefeC7a47AC26A10083E626e22d5e9d49eBf471) on GenLayer Bradbury, which was born in [this transaction](https://explorer-bradbury.genlayer.com/tx/0x2eba9b8c2fae10f78834f2091dd1c49d579497980fcea29e7156c1f472a9e7ce). Read it as a set of questions.
 
-- Live: https://warnedwarn.github.io/oddsmith/
-- Contract on explorer: https://explorer-bradbury.genlayer.com/address/0xCdefeC7a47AC26A10083E626e22d5e9d49eBf471
-- Deploy tx: https://explorer-bradbury.genlayer.com/tx/0x2eba9b8c2fae10f78834f2091dd1c49d579497980fcea29e7156c1f472a9e7ce
+---
 
-## What makes this need a chain
+**Why does a prediction oracle need a blockchain at all?**
 
-A prediction market or an oracle is only as trustworthy as the thing resolving it. Hand resolution to one server and you are back to trusting a black box. Oddsmith puts the resolution under consensus: the ruling is produced by a leader, then independently reproduced by every other validator, and only a result they agree on gets recorded. That reproducible, adversarial judgment over subjective evidence is precisely what GenLayer enables and a plain backend cannot.
+Because an oracle is only as trustworthy as whatever resolves it, and a single server resolving outcomes is just a black box you have to take on faith. Oddsmith moves the resolution under consensus: a leader validator produces the ruling, every other validator independently re-derives it, and only a result they agree on is written. That reproducible, adversarial judgment over subjective evidence is the part GenLayer makes possible and an ordinary backend cannot. Nothing is hosted but a static page; the contract is the whole system.
 
-Consequently there is nothing to host but a static page. The contract is the entire system, every forecast, criterion, ruling, confidence reading, and the event ledger live in contract storage under consensus. The website reads the chain and helps you write to it; switch it off and the oracle still stands.
+**What exactly is "the contract"? Where does state live?**
 
-## How a ruling is reached
+The contract *is* the backend. Every forecast, its criteria, the ruling, the confidence reading, and the event ledger live in contract storage under consensus. Records are JSON in a `TreeMap[str, str]` keyed by id, with a parallel `DynArray[str]` for insertion-ordered paging and `u256` counters (`total_forecasts`, `total_resolved`, `total_yes`) so statistics never require a scan. The runner is pinned to `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`. Turn the website off and the oracle still stands.
 
-The interesting machinery is in `resolve_forecast` and the internal `_adjudicate`:
+**What can I actually call?**
 
-- **The leader runs the oracle.** A single validator feeds the claim, the criteria, and the submitted evidence into an injection-resistant prompt and returns `{ruling, confidence, rationale}`. The prompt treats all evidence as untrusted data; any attempt to rewrite the rules or impersonate the system is forced to INVALID with confidence 0.
-- **Every validator re-derives it.** Using a custom validator function (`gl.vm.run_nondet_unsafe`), each validator runs the same task. The `ruling` word must match exactly. The `confidence` is compared with a tolerance, the larger of 20 points or 20 percent, because honest models rarely agree on the exact number. A ruling mismatch or a wild confidence gap makes validators disagree, which rotates the leader and retries.
-- **Errors are classified for consensus.** Deterministic `[EXPECTED]` errors must match exactly; `[TRANSIENT]` errors agree when both sides hit them; LLM or unknown failures force disagreement so bad output never settles.
-- **Code has the final say.** After consensus, a deterministic backstop caps INVALID confidence at 40, so a low-trust ruling can never be recorded as near-certain regardless of what the model emitted.
+Two writes and four reads.
 
-## Storage and the public surface
+- `open_forecast(claim, criteria, resolve_after) -> id` validates lengths, stores an OPEN record, logs the event, returns the id. Deterministic, no AI.
+- `resolve_forecast(forecast_id, evidence)` is the AI write: it guards (exists, still open, evidence sized), runs one consensus round, applies a backstop, flips the record to RESOLVED, and appends to the ledger.
+- `get_forecasts(start)`, `get_forecast(id)`, `get_ledger(start)`, and `get_stats()` are the reads, each paged at twenty.
 
-State is JSON records in a `TreeMap[str, str]` keyed by id, with a parallel `DynArray[str]` for insertion-ordered paging and `u256` counters (`total_forecasts`, `total_resolved`, `total_yes`) so stats never require a scan. Runner pinned to `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`.
+**How is the ruling reached, step by step?**
 
-Writes:
-- `open_forecast(claim, criteria, resolve_after) -> id` validates lengths, stores an OPEN record, logs the event, returns the new id. Deterministic, no AI.
-- `resolve_forecast(forecast_id, evidence)` guards (exists, still open, evidence sized), runs one consensus round, applies the backstop, flips the record to RESOLVED, and appends to the ledger. This is the AI write.
+Inside `_adjudicate`: the leader feeds the claim, criteria, and evidence into an injection-resistant prompt and returns `{ruling, confidence, rationale}`, treating all evidence as untrusted data (any attempt to rewrite the rules or impersonate the system is forced to INVALID, confidence 0). Then a custom validator (`gl.vm.run_nondet_unsafe`) has every validator re-run the task. The `ruling` word must match exactly; the `confidence` must agree within tolerance, the larger of 20 points or 20 percent. A mismatch or a wild confidence gap rotates the leader. Error classes are compared so even failures reach consensus.
 
-Reads (all paged at 20):
-- `get_forecasts(start)` ordered list, `get_forecast(id)` one record, `get_ledger(start)` the append-only event log, `get_stats()` the running totals.
+**Can a confident-looking INVALID slip through?**
 
-## The interface
+No. A prompt can be coaxed; arithmetic cannot. After consensus a deterministic backstop caps INVALID confidence at 40, so a low-trust ruling can never be recorded as near-certain no matter what the model emitted.
 
-Next.js 14 exported to static HTML, TypeScript, Tailwind, Framer Motion, lucide icons, genlayer-js 1.1.8.
+**What is the site built from, and why does it look like that?**
 
-Visual language is blueprint schematic: a dark navy drafting field with a faint grid, cyan line-work, corner crop marks on every panel, dashed connectors between steps, measurement ticks, and a hero canvas that traces a live probability curve under drifting crosshairs. Display type is Chakra Petch over Inter, with JetBrains Mono for anything on-chain. It is built to read like a technical drawing, deliberately unlike the other projects in the registry.
+Next.js 14 exported to static HTML, TypeScript, Tailwind, Framer Motion, lucide icons, genlayer-js 1.1.8. The visual language is blueprint schematic: a dark navy drafting field with a faint grid, cyan line-work, corner crop marks on every panel, dashed connectors, measurement ticks, and a hero canvas tracing a live probability curve under drifting crosshairs. Chakra Petch over Inter, JetBrains Mono for anything on-chain. It is meant to read like a technical drawing.
 
-Notable behavior:
-- Reads need no wallet; the board renders chain state on load, wrapped so a failed RPC degrades one section instead of the page.
-- Two write paths share one modal: drafting a forecast (deterministic, fast) and resolving one (the AI write). The resolve flow stages the real consensus lifecycle and previews the leader's draft ruling decoded from the receipt, marked as a draft until sealed.
-- Status polling uses `gen_getTransactionByHash` (no VM execution, dodges the read rate limit); board polling is slow and pauses while a write is in flight.
-- Timeouts read as leader rotation, never errors; only ACCEPTED, FINALIZED, UNDETERMINED, and CANCELED end the wait.
+**What should I expect while a forecast resolves?**
 
-## Build and run
+Reads need no wallet, so the board renders chain state on load behind an error boundary. The resolve flow stages the real consensus lifecycle and previews the leader's draft ruling decoded from the receipt, marked as a draft until sealed. An AI write takes one to five minutes; status is polled via `gen_getTransactionByHash` (no VM execution, so it dodges the read rate limit), board polling is slow and pauses while a write is in flight, and leader rotation reads as progress, never an error.
+
+**How do I run or deploy it myself?**
+
+Lint and test the contract, then build the interface:
 
 ```bash
-# contract
 pip install genvm-linter genlayer-test
 genvm-lint check contracts/contract.py
 gltest tests/integration/ -v -s --network studionet
-
-# interface
-cd frontend && npm install
-npm run dev      # localhost:3000
-npm run build    # static export into frontend/out
+cd frontend && npm install && npm run build
 ```
 
-Deployment uses the signing key in a repo-root `.env` (template in `.env.example`), not the CLI keychain:
+Deploy signs with the key in a repo-root `.env` (template in `.env.example`), not the CLI keychain: `python scripts/deploy.py`, then `scripts/verify_read.py` and `scripts/verify_write.py` prove the read and the full AI write. Ship the static export with `npm run deploy` from `frontend/` (pushes `out/` to `gh-pages` with `--dotfiles`). Need test GEN to try a write? Claim it at [testnet-faucet.genlayer.foundation](https://testnet-faucet.genlayer.foundation/).
 
-```bash
-python scripts/deploy.py        # deploy and verify the receipt
-python scripts/verify_read.py   # read gate
-python scripts/verify_write.py  # open + AI resolve, end to end
-```
+**Is this financial advice?**
 
-Ship the interface to GitHub Pages from `frontend/`:
-
-```bash
-npm run deploy   # builds, pushes out/ to gh-pages with --dotfiles
-```
-
-## Coordinates
-
-| | |
-| --- | --- |
-| Live | https://warnedwarn.github.io/oddsmith/ |
-| Contract | https://explorer-bradbury.genlayer.com/address/0xCdefeC7a47AC26A10083E626e22d5e9d49eBf471 |
-| Deploy tx | https://explorer-bradbury.genlayer.com/tx/0x2eba9b8c2fae10f78834f2091dd1c49d579497980fcea29e7156c1f472a9e7ce |
-| Test GEN | https://testnet-faucet.genlayer.foundation/ |
-
-The oracle is an AI ruling under validator consensus on a test network. It evaluates evidence against stated criteria and is not financial advice.
+No. The oracle is an AI ruling under validator consensus on a test network; it evaluates evidence against stated criteria and nothing here is financial advice.
