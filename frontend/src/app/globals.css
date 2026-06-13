@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #081020;
+  background-image:
+    linear-gradient(rgba(57, 211, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(57, 211, 255, 0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+@layer base {
+  ::selection {
+    background: #39d3ff;
+    color: #081020;
+  }
+}
+
+@layer utilities {
+  .uplabel {
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 0.7rem;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .focus-ring:focus-visible {
+    outline: 2px solid #39d3ff;
+    outline-offset: 2px;
+  }
+  /* technical-drawing panel: corner crop marks */
+  .schematic {
+    position: relative;
+  }
+  .schematic::before,
+  .schematic::after {
+    content: '';
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: #39d3ff;
+    opacity: 0.7;
+  }
+  .schematic::before {
+    top: -1px;
+    left: -1px;
+    border-top: 2px solid;
+    border-left: 2px solid;
+  }
+  .schematic::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 2px solid;
+    border-right: 2px solid;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #081020;
+}
+::-webkit-scrollbar-thumb {
+  background: #1b2c46;
+  border: 2px solid #081020;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #39d3ff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

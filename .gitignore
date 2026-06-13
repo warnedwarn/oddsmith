@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+frontend/node_modules/
+
+# next.js
+frontend/.next/
+frontend/out/
+
+# python
+__pycache__/
+*.pyc
+.gltest_cache/
+artifacts/
+
+# secrets - never commit
+.env
+*.key
+
+# os
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+npm-debug.log*
